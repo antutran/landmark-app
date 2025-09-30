@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+ultralytics
+opencv-python-headless
+pillow
+numpy
+python-multipart
+huggingface_hub>=0.25.2

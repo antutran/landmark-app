@@ -1,0 +1,23 @@
+{
+  "name": "landmark-app",
+  "version": "1.0.0",
+  "description": "Web app giao diện chấm điểm landmarks (AI + camera + lịch sử)",
+  "author": "Your Name",
+  "license": "MIT",
+  "scripts": {
+    "start": "npx live-server --open=public/index.html .",
+    "dev": "npx http-server . -c-1 -o public/index.html"
+  },
+
+  "dependencies": {
+    "idb-keyval": "^6.2.1",      
+    "jszip": "^3.10.1",           
+    "file-saver": "^2.0.5"       
+  },
+  "devDependencies": {
+    "eslint": "^9.12.0",       
+    "prettier": "^3.3.3",       
+    "http-server": "^14.1.1",    
+    "live-server": "^1.2.2"      
+  }
+}

@@ -1,0 +1,12 @@
+FROM nginx:1.27-alpine
+
+# web root
+COPY public/ /usr/share/nginx/html/
+# ES modules, libs
+COPY src/ /usr/share/nginx/html/src/
+COPY vendor/ /usr/share/nginx/html/vendor/
+
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+RUN find /usr/share/nginx/html -type d -exec chmod 755 {} \; \
+ && find /usr/share/nginx/html -type f -exec chmod 644 {} \;

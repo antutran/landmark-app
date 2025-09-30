@@ -1,0 +1,23 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: landmark-app-backend
+    environment:
+      - LM_MODEL_REPO=Antu206/landmark-ai-model
+      - LM_MODEL_FILENAME=best.pt
+    ports:
+      - "5001:8000"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+    container_name: landmark-app-web
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+    restart: unless-stopped
