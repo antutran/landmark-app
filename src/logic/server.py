@@ -1,7 +1,6 @@
 from __future__ import annotations
 import io, os, time, base64, traceback
 from typing import Optional, Dict, Any
-from huggingface_hub import hf_hub_download
 import numpy as np
 from PIL import Image, ImageOps
 from fastapi import FastAPI, UploadFile, File, Form
@@ -136,66 +135,51 @@ def health():
     return {"ok": True, "model_loaded": STATE.model is not None, "nc": NC}
 
 # ============================== Load model at startup ==============================
+from huggingface_hub import hf_hub_download
+
 @app.on_event("startup")
 def load_bundled_model():
-    """
-    Load YOLO model on server start.
+    """Load YOLO model on server start.
 
-    Thứ tự ưu tiên nguồn model:
-      1) LM_MODEL_PATH  : đường dẫn file .pt có sẵn trong máy (volume/file)
-      2) LM_MODEL_REPO + LM_MODEL_FILENAME : tải từ Hugging Face (khuyên dùng)
-      3) LM_MODEL_URL   : URL tải trực tiếp .pt (S3/Drive…)
-      4) ./models/best.pt (bundled fallback cạnh file server.py)
-
-    Biến môi trường gợi ý khi deploy Render:
-      LM_MODEL_REPO=Antu206/landmark-ai-model
-      LM_MODEL_FILENAME=best.pt
+    Priority:
+      1) LM_MODEL_PATH env var (file or directory)
+      2) HuggingFace Hub via LM_MODEL_REPO + LM_MODEL_FILE
+      3) Bundled path next to this file: models/best.pt
     """
     try:
         here = os.path.dirname(__file__)
+        env_path = os.environ.get("LM_MODEL_PATH", "").strip()
+        repo_id = os.environ.get("LM_MODEL_REPO", "").strip()
+        filename = os.environ.get("LM_MODEL_FILE", "best.pt")
 
-        # 1) File path có sẵn
-        path_env = os.environ.get("LM_MODEL_PATH", "").strip()
-        if path_env and os.path.exists(path_env):
-            chosen = path_env
-        else:
-            chosen = None
+        candidates = []
 
-        # 2) Hugging Face (khuyên dùng)
-            # repo_id vd: Antu206/landmark-ai-model | filename: best.pt
-        if chosen is None:
-            repo_id = os.environ.get("LM_MODEL_REPO", "").strip()
-            fname   = os.environ.get("LM_MODEL_FILENAME", "best.pt").strip()
-            if repo_id:
-                print(f"[server] Downloading model from HF: {repo_id}/{fname}")
-                chosen = hf_hub_download(repo_id=repo_id, filename=fname)
+        # 1. Nếu LM_MODEL_PATH tồn tại
+        if env_path:
+            if os.path.isdir(env_path):
+                candidates.append(os.path.join(env_path, "best.pt"))
+            else:
+                candidates.append(env_path)
 
-        # 3) URL trực tiếp (ít dùng)
-        if chosen is None:
-            url = os.environ.get("LM_MODEL_URL", "").strip()
-            if url:
-                import urllib.request, tempfile
-                os.makedirs(os.path.join(here, "models"), exist_ok=True)
-                tmp_path = os.path.join(here, "models", "best.pt")
-                print(f"[server] Downloading model from URL: {url}")
-                urllib.request.urlretrieve(url, tmp_path)
-                chosen = tmp_path
+        # 2. Nếu có repo HuggingFace
+        if repo_id:
+            try:
+                hf_path = hf_hub_download(repo_id=repo_id, filename=filename)
+                candidates.append(hf_path)
+            except Exception as e:
+                print("[server] HuggingFace download failed:", e)
 
-        # 4) Bundled fallback
-        if chosen is None:
-            bundled = os.path.join(here, "models", "best.pt")
-            if os.path.exists(bundled):
-                chosen = bundled
+        # 3. Fallback local
+        candidates.append(os.path.join(here, "models", "best.pt"))
 
+        chosen = next((p for p in candidates if p and os.path.exists(p)), None)
         if not chosen:
-            raise FileNotFoundError("Model file not found via LM_MODEL_PATH / LM_MODEL_REPO / LM_MODEL_URL / bundled.")
+            raise FileNotFoundError("Model file not found. Tried: " + ", ".join(candidates))
 
-        t0 = time.time()
         m = YOLO(chosen)
         STATE.model = m
-        STATE.names = LANDMARK_NAMES.copy()  # giữ tên lớp cố định theo YAML
-        print(f"[server] Loaded model '{chosen}' in {time.time()-t0:.2f}s")
-
+        STATE.names = LANDMARK_NAMES.copy()
+        print(f"[server] Loaded model '{chosen}'")
     except Exception as e:
         STATE.model = None
         print("[server] Failed to load model:", e)
