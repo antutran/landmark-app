@@ -5,4 +5,5 @@ opencv-python-headless
 pillow
 numpy
 python-multipart
-huggingface_hub>=0.25.2
+huggingface_hub>=0.23
+requests>=2.31

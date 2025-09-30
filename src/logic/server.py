@@ -135,51 +135,65 @@ def health():
     return {"ok": True, "model_loaded": STATE.model is not None, "nc": NC}
 
 # ============================== Load model at startup ==============================
-from huggingface_hub import hf_hub_download
+import os, time, io, base64, traceback, tempfile, shutil
+import requests
+from huggingface_hub import hf_hub_download, HfApi
+
 
 @app.on_event("startup")
 def load_bundled_model():
-    """Load YOLO model on server start.
-
-    Priority:
-      1) LM_MODEL_PATH env var (file or directory)
-      2) HuggingFace Hub via LM_MODEL_REPO + LM_MODEL_FILE
-      3) Bundled path next to this file: models/best.pt
-    """
     try:
         here = os.path.dirname(__file__)
+
+        # lấy env
         env_path = os.environ.get("LM_MODEL_PATH", "").strip()
-        repo_id = os.environ.get("LM_MODEL_REPO", "").strip()
-        filename = os.environ.get("LM_MODEL_FILE", "best.pt")
+        repo_id  = os.environ.get("LM_MODEL_REPO", "").strip()
+        filename = os.environ.get("LM_MODEL_FILE", "best.pt").strip()
 
-        candidates = []
+        # nơi lưu tạm file model
+        os.makedirs(os.path.join(here, "models"), exist_ok=True)
+        local_model = os.path.join(here, "models", "best.pt")
 
-        # 1. Nếu LM_MODEL_PATH tồn tại
-        if env_path:
-            if os.path.isdir(env_path):
-                candidates.append(os.path.join(env_path, "best.pt"))
+        def download_from_url(url: str, dst: str):
+            with requests.get(url, stream=True, timeout=60) as r:
+                r.raise_for_status()
+                with open(dst, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            f.write(chunk)
+
+        chosen = None
+
+        if repo_id:  # cách 2: LM_MODEL_REPO + LM_MODEL_FILE
+            # nếu repo public KHÔNG cần token
+            tmp = hf_hub_download(repo_id=repo_id, filename=filename)  # tải về cache HF
+            shutil.copyfile(tmp, local_model)  # copy sang thư mục dự án
+            chosen = local_model
+
+        elif env_path:  # cách 1: LM_MODEL_PATH
+            if env_path.startswith("http://") or env_path.startswith("https://"):
+                download_from_url(env_path, local_model)
+                chosen = local_model
             else:
-                candidates.append(env_path)
+                # đường dẫn local tuyệt đối
+                if os.path.exists(env_path):
+                    chosen = env_path
 
-        # 2. Nếu có repo HuggingFace
-        if repo_id:
-            try:
-                hf_path = hf_hub_download(repo_id=repo_id, filename=filename)
-                candidates.append(hf_path)
-            except Exception as e:
-                print("[server] HuggingFace download failed:", e)
-
-        # 3. Fallback local
-        candidates.append(os.path.join(here, "models", "best.pt"))
-
-        chosen = next((p for p in candidates if p and os.path.exists(p)), None)
+        # fallback: bundled ./models/best.pt
         if not chosen:
-            raise FileNotFoundError("Model file not found. Tried: " + ", ".join(candidates))
+            bundled = os.path.join(here, "models", "best.pt")
+            if os.path.exists(bundled):
+                chosen = bundled
 
+        if not chosen or not os.path.exists(chosen):
+            raise FileNotFoundError(f"Model file not found. Tried: {env_path or '[empty]'}, {repo_id}/{filename}, {local_model}")
+
+        t0 = time.time()
         m = YOLO(chosen)
         STATE.model = m
         STATE.names = LANDMARK_NAMES.copy()
-        print(f"[server] Loaded model '{chosen}'")
+        print(f"[server] Loaded model '{chosen}' in {time.time()-t0:.2f}s")
+
     except Exception as e:
         STATE.model = None
         print("[server] Failed to load model:", e)
